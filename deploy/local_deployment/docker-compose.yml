@@ -1,0 +1,166 @@
+version: '3.9'
+services:
+    redis:
+        image: redis:6.2
+        command: redis-server --protected-mode no
+        ports:
+            - "6379"
+        restart: always
+        volumes:
+            - redis-volume:/data
+    ingress:
+        image: enocean/iotconnector_ingress:latest
+        restart: always
+        ports:
+            - "7070"
+        environment:
+            - REDIS_URL=redis
+            - "IOT_LICENSE_KEY=${IOT_LICENSE_KEY}"    #EEKAZ-MUYJD-AMHYH-KPGNQ" #enter license here, be sure not to have empty space after "=" e.g. IOT_LICENSE_KEY=LBIBA-BRZHX-SVEOU-ARPWB
+            - "IOT_AUTH_CALLBACK=host.docker.internal:8080" #enter URL here e.g. 192.167.1.1:8080 or myiotc.eastus.azurecontainer.io:8080
+            - "IOT_GATEWAY_USERNAME=${IOT_GATEWAY_USERNAME}" #enter new username for the AP connection to IoTC. e.g. user1
+            - "IOT_GATEWAY_PASSWORD=${IOT_GATEWAY_PASSWORD}" #enter new password for the AP connection to IoTC. e.g. gkj35zkjasb5
+            # - TOKEN_EXP_INTERVAL= # Auth token expiration interval in seconds. Defaults to 3600 
+        depends_on:
+            - redis
+    api:
+        image: enocean/iotconnector_api:latest
+        ports:
+            - "1887"
+        restart: always
+        environment:
+            - REDIS_URL=redis
+            # - ONLY_SECURE_DEVICES=1 # Comment out if you want only secure devices to be allowed
+        depends_on:
+            - redis
+    engine:
+        image: enocean/iotconnector_engine:latest
+        restart: always
+        environment:
+            - REDIS_URL=redis
+            - "IOT_LICENSE_KEY=EEKAZ-MUYJD-AMHYH-KPGNQ"#enter license here, be sure not to have empty space after "=" e.g. IOT_LICENSE_KEY=LBIBA-BRZHX-SVEOU-ARPWB
+            - MQTT_CONNSTRING=mqtt:1883 # comment this section out if mqtt is not desired. Default path is locally deployed mosquitto broker - for tests only.
+            #- MQTT_AUTH=1 # Comment this section out and specficy below credentials to use basic auth for MQTT connections. If you the mosquito broker also use the enocean build.
+            #- MQTT_USERNAME=
+            #- MQTT_PASSWORD=
+            - IOT_MQTT_CLIENT_ID=iotc_test_instance_1
+            - INGRESS_HOST=ingress
+            - INGRESS_PORT=7070
+            - INGRESS_USERNAME=user1
+            - INGRESS_PASS=pass
+            - API_URL=http://api:1887/api.beta/v1
+            # - HEALTH_PUBLISH_INTERVAL=600 # How often to publish system health in seconds. Defaults to 600
+            # ----------  Configuration MQTT over TLS  ---------- #
+            # - MQTT_CONNSTRING=mosquitto:8883
+            # - MQTT_AUTH=0
+            # - MQTT_LOCAL_EGRESS_ENABLE=1
+            # - MQTT_USE_TLS=True
+            # - MQTT_USE_TLS_VERIFY=True
+            # ----------   END   ---------- #
+        depends_on:
+            - redis
+    integration:
+        image: enocean/iotconnector_integration:latest
+        environment:
+            - REDIS_URL=redis
+            - IOT_ENABLE_MQTT=1
+            - MQTT_CONNSTRING=mqtt:1883
+
+            # ----------  Configuration MQTT over TLS  ---------- #
+            # - MQTT_CONNSTRING=mosquitto:8883
+            # - MQTT_AUTH=0
+            # - MQTT_LOCAL_EGRESS_ENABLE=1
+            # - MQTT_USE_TLS=True
+            # - MQTT_USE_TLS_VERIFY=True
+            # ----------   END   ---------- #
+
+            # MQTT publish PATH can be customized with ENV variables. Please check the Product documentation for details: https://iotconnector-docs.readthedocs.io/en/latest/deployment-notes/#overview-of-environment-variables
+            - SENSOR_STATS_INTERVAL=600 # report interval in s of sensor stats
+            - GATEWAY_STATS_INTERVAL=600 # report interval in s of gateway stats
+            # Azure IoT Central Integration related variables
+            # - IOT_ENABLE_IOTCENTRAL=1
+            # - IOT_CENTRAL_ADDRESS=
+            # - IOT_CENTRAL_TOKEN=
+            # - IOT_BRIDGE_ADDRESS=
+            # - IOT_CENTRAL_SERVICE_BUS_CONN_STR=
+            # - IOT_CENTRAL_SERVICE_BUS_QUEUE=
+            # - EIOTC_API_URL=https://localhost/api.beta/v1/
+            # - BASIC_AUTH_USERNAME=
+            # - BASIC_AUTH_PASSWORD=
+
+            # ----------  Secret Binding for MQTTS Certificates  ---------- #
+            # secrets:
+            #     - source: mqtt-ca-cert
+            #       target: /mqtt-ca.crt
+
+            #     - source: mqtt-client-cert
+            #       target: /mqtt-mqtt_client.crt
+
+            #     - source: mqtt-client-key
+            #       target: /mqtt-mqtt_client.key
+
+            # ----------  Secret Binding for MQTTS Certificates  ---------- #
+
+        depends_on:
+            - engine
+            - redis
+
+    proxy:
+        image: enocean/proxy:local
+        restart: always
+        ports:
+            - "443:443"
+            - "80:80"
+            - "8080:8080"
+        secrets:
+            - source: secret-proxy-certificate
+              target: /etc/nginx/certs/cert.crt
+            - source: secret-proxy-key
+              target: /etc/nginx/certs/cert.key
+        environment:
+            - "BASIC_AUTH_USERNAME=${BASIC_AUTH_USERNAME}" #enter new username for API connection of IoTC. e.g. user1
+            - "BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD}" #enter new password for API connection to IoTC. e.g. 5a4sdFadsa
+        depends_on:
+            - ingress
+            - api
+
+    # mosquitto broker is only deployed for demo purpouses and is not secured nor configured for a commercial deployment.
+    # OPTION 1: Please use own broker.
+    # Option 2: Configure the mosquitto broker to be secure - https://mosquitto.org/man/mosquitto-tls-7.html,
+    #   Example with mosquitto broker in Docker + TLS: https://medium.com/himinds/mqtt-broker-with-secure-tls-and-docker-compose-708a6f483c92
+    #   Example with mosquitto broker in Docker + lets encrypt: https://medium.com/himinds/mqtt-broker-with-secure-websocket-using-traefik-docker-compose-and-lets-encrypt-2b8e32207555
+    #   Example with mosquitto broker in Docker + user authentication: https://centurio.net/2019/12/16/configure-mosquitto-mqtt-broker-user-authentication-in-docker-running-on-synology-nas/, https://stackoverflow.com/questions/46742443/mqtt-server-in-docker-a-way-to-run-the-mosquitto-passwd-u-from-dockercompos
+    # OPTION 3: You can use a commercial broker e.g. HiveMQ https://www.hivemq.com/blog/mqtt-security-fundamentals-tls-ssl/
+    mqtt:
+        image: eclipse-mosquitto:1.6.13
+        #image: enocean/enocean-mosquitto:latest If you want to use MQTT Basic Auth, use this image for the broker.
+        restart: always
+        ports:
+            - "1883:1883"
+            # - "8883:8883"  Uncomment to open TLS port
+            # ----------  Uncomment Volume Section for TLS Configuration  ---------- #
+            # volumes:
+            #     - ./mqtt/config:/mosquitto/config/
+            # ----------  End  ---------- #
+
+            #environment: # ENV parameters are only available if using enocean/enocean-mosquitto:latest
+            #- ALLOW_ANON=true # Set to false for MQTT authentification. Set credentials username and password below.
+            #- MQTT_USERNAME=
+            #- MQTT_PASSWORD=
+
+
+
+volumes:
+    redis-volume:
+
+        #secrets are defined by docker to keep sensitive information hidden
+secrets:
+    secret-proxy-certificate:
+        file: ../nginx/dev.localhost.crt
+    secret-proxy-key:
+        file: ../nginx/dev.localhost.key
+    # mqtt-ca-cert:
+    #     file: ./mqtt/config/certs/ca.crt   # Point your CA Certificate for MQTTS
+    # mqtt-client-cert:
+    #     file: ./mqtt/config/certs/client.crt  # Point your Client Certificate for MQTTS
+    # mqtt-client-key:
+    #     file: ./mqtt/config/certs/client.key  # Point your Client Key for MQTTS

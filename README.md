@@ -1,5 +1,13 @@
-## The documentation has moved to [https://iotconnector-docs.readthedocs.io/](https://iotconnector-docs.readthedocs.io/).
+## Export your valid IOT_LICENSE_KEY
+```bash
+export IOT_LICENSE_KEY=EEKAZ-MUYJD-AMHYH-KPGNQ
+```
 
-## The page below will not be updated anymore and eventually deleted.
+## Deploy/Destroy your local env by next commands:
+```bash
+bash start_local_env.sh deploy
+bash start_local_env.sh destroy
+```
 
-## Please refer to the new page.
+## Navigate to the API by the link
+https://localhost
